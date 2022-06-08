@@ -3,6 +3,7 @@ import json
 import os
 
 import gym
+import sinergym
 import numpy as np
 import tensorflow as tf
 from tqdm import trange
@@ -21,8 +22,8 @@ def create_argument_parser():
         description='An implementation of the Distributional Policy Optimization paper.',
     )
     parser.add_argument(
-        '--environment', default="HalfCheetah-v2",
-        help='name of the environment to run. default="HalfCheetah-v2"'
+        '--environment', default="Eplus-datacenter-hot-continuous-stochastic-v1",
+        help='name of the environment to run'
     )
     parser.add_argument(
         '--gamma', type=float, default=0.99, metavar='G',
@@ -34,8 +35,8 @@ def create_argument_parser():
     )
     parser.add_argument('--noise', default='normal', choices=['ou', 'normal'])
     parser.add_argument(
-        '--noise_scale', type=float, default=0.2, metavar='G',
-        help='(default: 0.2)'
+        '--noise_scale', type=float, default=0.0, metavar='G',
+        help='(default: 0.0)'
     )
     parser.add_argument(
         '--batch_size', type=int, default=64, metavar='N',
@@ -61,12 +62,12 @@ def create_argument_parser():
         '--model_path', type=str, default='/tmp/dpo/',
         help='trained model is saved to this location, default="/tmp/dpo/"'
     )
-    parser.add_argument('--start_timesteps', type=int, default=10000, metavar='N')
-    parser.add_argument('--eval_freq', type=int, default=5000, metavar='N')
+    parser.add_argument('--start_timesteps', type=int, default=1000, metavar='N')
+    parser.add_argument('--eval_freq', type=int, default=500000, metavar='N')
     parser.add_argument('--eval_episodes', type=int, default=10, metavar='N')
     parser.add_argument(
-        '--buffer_size', type=int, default=1000000, metavar='N',
-        help='size of replay buffer (default: 1000000)'
+        '--buffer_size', type=int, default=1000, metavar='N',
+        help='size of replay buffer (default: 1000)'
     )
     parser.add_argument('--action_samples', type=int, default=16)
     parser.add_argument('--visualize', default=False, action='store_true')
@@ -75,7 +76,7 @@ def create_argument_parser():
         help='For multiple different experiments, provide an informative experiment name'
     )
     parser.add_argument('--print', default=False, action='store_true')
-    parser.add_argument('--actor', default='IQN', choices=['IQN', 'AIQN'])
+    parser.add_argument('--actor', default='AIQN', choices=['IQN', 'AIQN'])
     parser.add_argument(
         '--normalize_obs', default=False, action='store_true', help='Normalize observations'
     )
@@ -95,7 +96,7 @@ def create_argument_parser():
         help='Boltzmann Temperature for normalizing actions, default=1.0'
     )
     parser.add_argument(
-        '--num_steps', type=int, default=2000000, metavar='N',
+        '--num_steps', type=int, default=1000000, metavar='N',
         help='number of training steps to play the environments game (default: 2000000)'
     )
     return parser
@@ -122,7 +123,6 @@ def evaluate_policy(policy, env, episodes):
             state, reward, is_terminal, _ = env.step(action)
             state, reward = np.float32(state), np.float32(reward)
             rewards.append(float(reward))
-            # env.render()
     return rewards
 
 
@@ -214,6 +214,8 @@ def main():
                     results_dict['train_rewards'].append(
                         (total_steps, episode_rewards)
                     )
+                    with open('results.txt', 'w') as file:
+                        file.write(json.dumps(results_dict))
                     episode_steps = 0
                     episode_rewards = 0
                     _reset_noise(gac, noise)
@@ -221,8 +223,10 @@ def main():
                     state = next_state
                     episode_steps += 1
 
+                if total_steps % 100 == 0:
+                    print('current progress: ' + str(total_steps))
                 # evaluate
-                if total_steps % args.eval_freq == 0:
+                if (total_steps + 1) % args.eval_freq == 0:
                     eval_rewards = evaluate_policy(gac, eval_env, args.eval_episodes)
                     eval_reward = sum(eval_rewards) / args.eval_episodes
                     eval_variance = float(np.var(eval_rewards))
@@ -233,8 +237,7 @@ def main():
                         'eval_reward_variance': eval_variance
                     })
                     with open('results.txt', 'w') as file:
-                        file.write(json.dumps(results_dict['eval_rewards']))
-
+                        file.write(json.dumps(results_dict))
                 total_steps += 1
             # train
             if gac.replay.size >= args.batch_size:
